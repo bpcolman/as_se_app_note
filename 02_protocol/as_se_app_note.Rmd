@@ -62,15 +62,22 @@ colnames(conc_all) <-
 
 conc_all <- conc_all[-5, ] # AsSe 10 ppb sample, seems to be dupe of AsSe 10ppb REE 0?
 
-conc_all %<>% 
-  pivot_longer(2:49, 
+conc_longer <- 
+  pivot_longer(conc_all,
+               2:49, 
                names_to = "isomodes", 
                values_to = "conc") %>%
   separate("isomodes", into = c("isotope", "mode", "masses"),sep = c(5,-5)) %>%
-  gsub("")
+  select(-masses)
+
+conc_longer$mode %<>% 
+  gsub(" ", "", .) %>%
+  gsub("[0-9]+[0-9]+[0-9]+[0-9]", "Std", .) %>%
+  gsub("[0-9]+[0-9]", "Std", .)
+
 
 conc_blank <- 
-  filter(conc_all,samp_id == "LBLANK")
+  filter(conc_all, samp_id == "LBLANK")
 
 conc_blank_sd <- data.frame(sd = apply(conc_blank[ , -1], 2, sd)) %>%
   mutate(analyte = rownames(.)) %>%
