@@ -1,0 +1,112 @@
+---
+title: Interference of doubly charged rare earth elements with arsenic and selenium
+  quantitation
+author: "Ben Colman"
+date: '2023-09-25'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen = 8)
+```
+
+```{r libraries}
+library(Rmisc) # For summarySE function, load before tidyverse
+library(multcomp) # For cld, load before tidyverse
+library(tidyverse)
+library(ggpubr)
+library(cowplot)
+library(scales)
+library(stringr)
+library(car)
+library(viridisLite)
+library(emmeans)
+library(xlsx)
+library(magrittr)
+```
+
+## Overview
+
+## Standard curves:
+All standard curves were fit with the same samples run for all the different isotopes and modes, and thus, a common approach was used to fit the data. All samples were initially fit with a weighted linear regression, and data were examined visually for how well they fit for the high concentration samples. If the fit looked reasonable for the high concentration samples (within ~5% of the expected value), we examined the low concentraiton samples to see how well they were fit. If they were fit reasonably well, we accepted the fit. If they were not, we examined whether switching to a "simple linear" fit resulted in a better fit. In those cases where the high concentration data were poorly fit by the weighted linear regression, we changed the fit to a simple linear model. In general, this resulted in a less robust fit at low concentrations, but a dramatic increase in the R$^2$. 
+
+```{r Importing data, echo=FALSE}
+
+conc_all <- read.xlsx("./01_input/as_se_app_note_data.xlsx", sheetIndex = 5) %>%
+  select(2, 8:66) %>%
+  select(-starts_with("Rh"), -starts_with("Kr"))
+
+names <- colnames(conc_all)
+
+names <- 
+  gsub("\\.", " ", names) %>%
+  gsub("Sample Id", "samp_id", .) %>%
+  gsub("  ", " ", .) %>%
+  gsub("  ", " ", .) %>% 
+  gsub(" Helium.KED_LowLow ppb ", "", .) %>%
+  gsub(" Oxygen DRC ppb ", "", .) %>%
+  gsub(" Ammonia DRC ppb ", "", .) %>%
+  gsub("Oxygen DRC ppb", "", .) %>%
+  gsub(" Hydrogen DRC ppb ", "", .) %>%
+  gsub("As ", "As 75 ", .) %>%
+  gsub("As 75 75", "As 75 ", .) %>%
+  gsub("O2 MSMS", "o2_msms", .) %>%
+  gsub("KED", "ked", .) %>%
+  gsub("O2 Q3", "o2q3 XX", .) %>%
+  gsub("OShift", "oshift", .) %>%
+  gsub("NH3", "nh3", .) 
+
+colnames(conc_all) <- 
+  names
+
+conc_all <- conc_all[-5, ] # AsSe 10 ppb sample, seems to be dupe of AsSe 10ppb REE 0?
+
+conc_all %<>% 
+  pivot_longer(2:49, 
+               names_to = "isomodes", 
+               values_to = "conc") %>%
+  separate("isomodes", into = c("isotope", "mode", "masses"),sep = c(5,-5)) %>%
+  gsub("")
+
+conc_blank <- 
+  filter(conc_all,samp_id == "LBLANK")
+
+conc_blank_sd <- data.frame(sd = apply(conc_blank[ , -1], 2, sd)) %>%
+  mutate(analyte = rownames(.)) %>%
+  select(2, 1) %>%
+  remove_rownames() %>%
+  mutate(mdl = sd*qt(0.01, length(conc_blank$samp_id) - 1, lower.tail = FALSE))
+
+
+conc_ccv <- 
+  filter(conc_all,samp_id == "CCV 10ppb")
+
+conc_ccv <- 
+  conc_ccv[-6, ] # Bad data due to bad IS due to instrument error
+
+summary(conc_ccv)
+conc_srs <- 
+  filter(conc_all, samp_id %in% c("PPREE1", "SCREE1", paste0("T", 223:249)))
+
+conc_single <- 
+  filter(conc_all, 
+         !samp_id %in% 
+           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
+         str_detect(samp_id, "^AsSe", negate = TRUE))
+
+conc_multi <- 
+  filter(conc_all, 
+         !samp_id %in% 
+           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
+         str_detect(samp_id, "^AsSe", negate = FALSE))
+
+
+
+```
+
+Next steps include pivoting and parsing. Pivoting the conc_data dataframe by analyte, then parsing the analyte names and the samplesamp_ids so we can know what was in the sample and what was analyzed. To do this, I may want to parse out the single element samples,
+
+analyte (e.g., Se74, As75, Se76)
+mode (ked, oshift, o2msms, o2q3, nh3, std)
+facet
