@@ -8,7 +8,6 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-options(scipen = 8)
 ```
 
 ```{r libraries}
@@ -24,6 +23,31 @@ library(viridisLite)
 library(emmeans)
 library(xlsx)
 library(magrittr)
+library(kableExtra)
+```
+
+```{r aesthetics}
+
+# Get rid of scientific notation
+options(scipen = 8)
+
+# Set a theme for consistency in plots
+theme_set(theme_bw() + 
+            theme(axis.title.x = element_text( size=16),
+                  panel.grid.major = element_line(),
+                  axis.title.y = element_text( size=16),
+                  axis.text.x = element_text(size = 12),
+                  axis.text.y = element_text(size = 12),
+                  legend.title = element_text(size = 12),
+                  legend.text=element_text(size=12),
+                  strip.text = element_text(size = 12))
+          )
+# Function for getting more log10 breaks on the axis...which may be too many
+base_breaks <- function(n = 10){
+  function(x) {
+    axisTicks(log10(range(x, na.rm = TRUE)), log = TRUE, n = n)
+  }
+}
 ```
 
 ## Overview
@@ -35,7 +59,9 @@ All standard curves were fit with the same samples run for all the different iso
 
 conc_all <- read.xlsx("./01_input/as_se_app_note_data.xlsx", sheetIndex = 5) %>%
   select(2, 8:66) %>%
-  select(-starts_with("Rh"), -starts_with("Kr"))
+  select(-starts_with("Rh"), -starts_with("Kr")) 
+
+conc_all <- conc_all[-c(5, 63), ] # Removed bad data due to bad IS due to instrument
 
 names <- colnames(conc_all)
 
@@ -55,12 +81,12 @@ names <-
   gsub("KED", "ked", .) %>%
   gsub("O2 Q3", "o2q3 XX", .) %>%
   gsub("OShift", "oshift", .) %>%
-  gsub("NH3", "nh3", .) 
+  gsub("NH3", "nh3", .) %>%
+  gsub("H", "h", .) 
 
 colnames(conc_all) <- 
   names
 
-conc_all <- conc_all[-5, ] # AsSe 10 ppb sample, seems to be dupe of AsSe 10ppb REE 0?
 
 conc_longer <- 
   pivot_longer(conc_all,
@@ -68,48 +94,46 @@ conc_longer <-
                names_to = "isomodes", 
                values_to = "conc") %>%
   separate("isomodes", into = c("isotope", "mode", "masses"),sep = c(5,-5)) %>%
-  select(-masses)
+  select(-masses) 
 
 conc_longer$mode %<>% 
   gsub(" ", "", .) %>%
-  gsub("[0-9]+[0-9]+[0-9]+[0-9]", "Std", .) %>%
-  gsub("[0-9]+[0-9]", "Std", .)
+  gsub("[0-9]+[0-9]+[0-9]+[0-9]", "std", .) %>%
+  gsub("[0-9]+[0-9]", "std", .) 
+
+conc_longer %<>% 
+    mutate(
+      mode = ordered(
+        mode, 
+        levels = c("std",
+                   "ked", 
+                   "h", 
+                   "nh3", 
+                   "o2_msms", 
+                   "o2q3", 
+                   "oshift")))
 
 
 conc_blank <- 
-  filter(conc_all, samp_id == "LBLANK")
+  filter(conc_longer, samp_id == "LBLANK")
 
-conc_blank_sd <- data.frame(sd = apply(conc_blank[ , -1], 2, sd)) %>%
-  mutate(analyte = rownames(.)) %>%
-  select(2, 1) %>%
-  remove_rownames() %>%
-  mutate(mdl = sd*qt(0.01, length(conc_blank$samp_id) - 1, lower.tail = FALSE))
-
-
-conc_ccv <- 
-  filter(conc_all,samp_id == "CCV 10ppb")
+conc_blank_summary <- 
+  summarySE(conc_blank, 
+            measurevar = "conc", 
+            groupvars = c("isotope", "mode")) %>%
+  select(1:5) %>%
+  mutate(mdl = sd*qt(0.01, N - 1, lower.tail = FALSE))
 
 conc_ccv <- 
-  conc_ccv[-6, ] # Bad data due to bad IS due to instrument error
+  filter(conc_longer, samp_id == "CCV 10ppb")
 
-summary(conc_ccv)
+conc_ccv_summary <- 
+  summarySE(conc_ccv,
+            measurevar = "conc",
+            groupvars = c("isotope", "mode"))
+
 conc_srs <- 
   filter(conc_all, samp_id %in% c("PPREE1", "SCREE1", paste0("T", 223:249)))
-
-conc_single <- 
-  filter(conc_all, 
-         !samp_id %in% 
-           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
-         str_detect(samp_id, "^AsSe", negate = TRUE))
-
-conc_multi <- 
-  filter(conc_all, 
-         !samp_id %in% 
-           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
-         str_detect(samp_id, "^AsSe", negate = FALSE))
-
-
-
 ```
 
 Next steps include pivoting and parsing. Pivoting the conc_data dataframe by analyte, then parsing the analyte names and the samplesamp_ids so we can know what was in the sample and what was analyzed. To do this, I may want to parse out the single element samples,
@@ -117,3 +141,179 @@ Next steps include pivoting and parsing. Pivoting the conc_data dataframe by ana
 analyte (e.g., Se74, As75, Se76)
 mode (ked, oshift, o2msms, o2q3, nh3, std)
 facet
+```{r}
+conc_blank_table <- 
+  conc_blank_summary %>%
+  mutate(mdl = round(mdl, digits = 3)) %>%
+  pivot_wider(names_from = isotope, 
+              values_from = mdl, 
+              id_cols = mode)
+
+conc_blank_table_formatted <- conc_blank_table 
+
+# Generate labels for isotope_labels that will be parsed
+# First pull in the levels to be converted
+isotope_labels_table <- 
+  c(levels(as.factor(conc_longer$isotope)))
+
+# Separate the levels
+isotope_labels_table <- data.frame(labels = isotope_labels_table) %>%
+  separate(., labels, into = c("element", "isotope"), sep = " ")
+
+# Recombine the levels and convert back to a vector
+isotope_labels_table <- 
+  as.vector(
+    paste0("<sup>", isotope_labels_table$isotope, "</sup>", isotope_labels_table$element))
+
+colnames(conc_blank_table_formatted) <- rbind(c("Mode", isotope_labels_table))
+
+
+mode_labels_table <- 
+  c("No Gas",
+    "KED",
+    "H<sub>2</sub> MSMS", 
+    "NH<sub>3</sub> MSMS", 
+    "O<sub>2</sub> MSMS",
+    "O<sub>2</sub> Q3",
+    "O<sub>2</sub> Shift")
+
+conc_blank_table_formatted[ ,1] <- 
+  mode_labels_table
+
+
+
+
+conc_blank_table_formatted %>%
+  kbl(escape = FALSE,
+      format = "html",
+      caption = "Table 1: Method detection limits (MDL) for all isotopes in 
+      all modes.") %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+
+```{r}
+conc_single <- 
+  filter(conc_longer, 
+         !samp_id %in% 
+           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
+         str_detect(samp_id, "^AsSe", negate = TRUE))
+
+
+conc_single %<>%
+  separate("samp_id", into = c("element", "amount"), sep = " ") %>%
+  mutate(
+    element = ordered(element, 
+                      levels = c("As", "Se", "Dy", "Er", "Eu", "Gd", "Ho",
+                                 "Nd", "Sm")),
+    amount = as.numeric(amount))
+
+conc_single_cen <-
+  merge(conc_single, 
+        conc_blank_summary %>% 
+          select(1,2,6), 
+        by.x = c(3, 4), 
+        by.y = c(1,2), 
+        all.y = TRUE) %>%
+  mutate(conc = ifelse(mdl >= conc, 1/2*mdl, conc)) %>%
+  select(-mdl)
+
+# Generate labels for mode that will be parsed
+mode_labels <- 
+  c("Standard",
+    "KED",
+    "H[2]~MSMS", 
+    "NH[3]~MSMS", 
+    "O[2]~MSMS",
+    "O[2]~Q3",
+    "O[2]~Shift")
+
+# Name labels to align with existing values
+names(mode_labels) <- levels(as.factor(conc_single_cen$mode))
+
+# Generate labels for isotope_labels that will be parsed
+# First pull in the levels to be converted
+isotope_labels <- 
+  c(levels(as.factor(conc_single_cen$isotope)))
+
+# Separate the levels
+isotope_labels <- data.frame(labels = isotope_labels) %>%
+  separate(., labels, into = c("element", "isotope"), sep = " ")
+
+# Recombine the levels and convert back to a vector
+isotope_labels <- 
+  as.vector(
+    paste0("''^", isotope_labels$isotope, "*", isotope_labels$element))
+
+names(isotope_labels) <- levels(as.factor(conc_single_cen$isotope))
+
+ggplot(
+  conc_single_cen %>%
+    mutate(
+      mode = factor(mode, labels = mode_labels),
+      isotope = factor(isotope, labels = isotope_labels)),
+    aes(x = amount, y = conc)
+  ) +
+  geom_line(aes(group = isotope, color = isotope)) +
+  geom_point(aes(group = isotope, color = isotope, shape = isotope)) +
+  scale_y_log10(breaks = base_breaks(),
+                labels = prettyNum) +
+  scale_x_log10() +
+  labs(x = "Concentration (ppb)", y = "Measured concentration, As or Se (ppb)") +
+  scale_color_viridis_d(name = "Analyte", 
+                        labels = parse_format()) +
+  scale_shape_manual(name = "Analyte", 
+                        labels = parse_format(), values = c(0, 15, 1, 16, 2, 17, 5)) +
+  theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
+  facet_grid(mode ~ element, labeller = as_labeller(label_parsed))
+
+```
+
+
+```{r plots take 1, fig.height = 12, fig.width = 10}
+conc_multi <- 
+  filter(conc_longer, 
+         !samp_id %in% 
+           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
+         str_detect(samp_id, "^AsSe", negate = FALSE)) 
+
+conc_multi$samp_id %<>%  
+  gsub("AsSe ", "", .) %>%
+  gsub("REE ", "", .)
+
+conc_multi %<>%
+  separate("samp_id", into = c("expected", "ree"), sep = " ") %>%
+  mutate(expected = as.ordered(expected), ree = as.numeric(ree))
+
+conc_multi_cen <-
+  merge(conc_multi, 
+        conc_blank_summary %>% 
+          select(1,2,6), 
+        by.x = c(3, 4), 
+        by.y = c(1,2), 
+        all.y = TRUE) %>%
+  mutate(conc = ifelse(mdl >= conc, 1/2*mdl, conc)) %>%
+  select(-mdl)
+
+# Generate a plot with facets, and with parsed facet labels drawn from the data.frame
+ggplot(
+  conc_multi_cen %>%
+    mutate(
+      mode = factor(mode, labels = mode_labels),
+      isotope = factor(isotope, labels = isotope_labels)),
+    aes(x = ree, y = conc)
+  ) +
+  geom_line(aes(group = expected, color = expected)) +
+  geom_point(aes(group = expected, color = expected)) +
+  scale_y_log10(breaks = base_breaks(),
+                labels = prettyNum) +
+  scale_x_log10(labels = prettyNum
+) +
+  labs(x = "Concentration REEs (ppb)", y = "Measured concentration, As or Se (ppb)") +
+  scale_color_viridis_d(name = "Actual \nConcentration \nAs or Se \n(ppb)") +
+  theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
+  facet_grid(isotope ~ mode, labeller = as_labeller(label_parsed))
+
+
+```
+
