@@ -10,7 +10,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r libraries}
+```{r libraries, include = FALSE}
 library(Rmisc) # For summarySE function, load before tidyverse
 library(multcomp) # For cld, load before tidyverse
 library(tidyverse)
@@ -26,7 +26,7 @@ library(magrittr)
 library(kableExtra)
 ```
 
-```{r aesthetics}
+```{r aesthetics, echo = FALSE}
 
 # Get rid of scientific notation
 options(scipen = 8)
@@ -34,7 +34,7 @@ options(scipen = 8)
 # Set a theme for consistency in plots
 theme_set(theme_bw() + 
             theme(axis.title.x = element_text( size=16),
-                  panel.grid.major = element_line(),
+                  panel.grid = element_blank(),
                   axis.title.y = element_text( size=16),
                   axis.text.x = element_text(size = 12),
                   axis.text.y = element_text(size = 12),
@@ -192,7 +192,7 @@ conc_blank_table_formatted %>%
 ```
 
 
-```{r}
+```{r single element tests, fig.height = 12, fig.width = 10}
 conc_single <- 
   filter(conc_longer, 
          !samp_id %in% 
@@ -247,25 +247,24 @@ isotope_labels <-
 
 names(isotope_labels) <- levels(as.factor(conc_single_cen$isotope))
 
-ggplot(
+(measured_conc_by_element_fig <- ggplot(
   conc_single_cen %>%
     mutate(
       mode = factor(mode, labels = mode_labels),
       isotope = factor(isotope, labels = isotope_labels)),
     aes(x = amount, y = conc)
   ) +
-  geom_line(aes(group = isotope, color = isotope)) +
-  geom_point(aes(group = isotope, color = isotope, shape = isotope)) +
-  scale_y_log10(breaks = base_breaks(),
-                labels = prettyNum) +
+  geom_line(aes(group = element, color = element)) +
+  geom_point(aes(group = element, color = element, shape = element)) +
+  scale_y_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
+                     breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
+                     labels = c("0", "", "0.1", "1", "10", "100", "1000")) +
   scale_x_log10() +
-  labs(x = "Concentration (ppb)", y = "Measured concentration, As or Se (ppb)") +
-  scale_color_viridis_d(name = "Analyte", 
-                        labels = parse_format()) +
-  scale_shape_manual(name = "Analyte", 
-                        labels = parse_format(), values = c(0, 15, 1, 16, 2, 17, 5)) +
+  labs(x = "Concentration added of\n As, Se, or individual REE (ppb)", y = "Measured concentration, As or Se (ppb)") +
+  scale_color_viridis_d(name = "Element added") +
+  scale_shape_manual(name = "Element added",, values = c(0, 15, 1, 16, 2, 17, 5, 6, 25)) +
   theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
-  facet_grid(mode ~ element, labeller = as_labeller(label_parsed))
+  facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)))
 
 ```
 
@@ -296,24 +295,45 @@ conc_multi_cen <-
   select(-mdl)
 
 # Generate a plot with facets, and with parsed facet labels drawn from the data.frame
-ggplot(
-  conc_multi_cen %>%
-    mutate(
-      mode = factor(mode, labels = mode_labels),
-      isotope = factor(isotope, labels = isotope_labels)),
-    aes(x = ree, y = conc)
-  ) +
-  geom_line(aes(group = expected, color = expected)) +
-  geom_point(aes(group = expected, color = expected)) +
-  scale_y_log10(breaks = base_breaks(),
-                labels = prettyNum) +
-  scale_x_log10(labels = prettyNum
-) +
-  labs(x = "Concentration REEs (ppb)", y = "Measured concentration, As or Se (ppb)") +
-  scale_color_viridis_d(name = "Actual \nConcentration \nAs or Se \n(ppb)") +
-  theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
-  facet_grid(isotope ~ mode, labeller = as_labeller(label_parsed))
+(measured_conc_by_ree_conc_fig <-
+  ggplot(
+    conc_multi_cen %>%
+      mutate(
+        mode = factor(mode, labels = mode_labels),
+        isotope = factor(isotope, labels = isotope_labels)
+        ),
+      aes(x = ree, y = conc)
+    ) +
+    geom_line(aes(group = expected, color = expected)) +
+    geom_point(aes(group = expected, color = expected)) +
+    scale_y_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
+                  breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
+                  labels = c("0", "", "0.1", "1", "10", "100", "1000")
+                  ) +
+    scale_x_log10(labels = prettyNum) +
+    labs(x = "Concentration REE mixture (ppb)", 
+         y = "Measured concentration, As or Se (ppb)"
+         ) +
+    scale_color_viridis_d(
+      name = "Actual \nConcentration \nAs or Se \n(ppb)") +
+    theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
+    facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)
+               )
+  )
 
 
+```
+
+```{r saving plots, include = FALSE, echo = false}
+save_plot("./03_incremental/measured_conc_by_element.png",
+          measured_conc_by_element_fig, 
+          base_height = 12, 
+          base_width = 10
+          )
+
+save_plot("./03_incremental/measured_conc_by_ree_conc.png", 
+          measured_conc_by_ree_conc_fig, 
+          base_height = 12, 
+          base_width = 10)
 ```
 
