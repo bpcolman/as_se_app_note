@@ -56,6 +56,19 @@ base_breaks <- function(n = 10){
 All standard curves were fit with the same samples run for all the different isotopes and modes, and thus, a common approach was used to fit the data. All samples were initially fit with a weighted linear regression, and data were examined visually for how well they fit for the high concentration samples. If the fit looked reasonable for the high concentration samples (within ~5% of the expected value), we examined the low concentraiton samples to see how well they were fit. If they were fit reasonably well, we accepted the fit. If they were not, we examined whether switching to a "simple linear" fit resulted in a better fit. In those cases where the high concentration data were poorly fit by the weighted linear regression, we changed the fit to a simple linear model. In general, this resulted in a less robust fit at low concentrations, but a dramatic increase in the R$^2$. 
 
 ```{r Importing data, echo=FALSE}
+calib_rsq <- read.xlsx("./01_input/standard_curve_fits.xlsx", sheetIndex = 1,
+                       colClasses = c("numeric", 
+                                      "character", 
+                                      "character", 
+                                      "character",
+                                      "numeric", 
+                                      "numeric",
+                                      "numeric", 
+                                      "numeric", 
+                                      "character")) 
+
+colnames(calib_rsq) <- c("isotope", "element", "mode", "curve_type", "other_r2",
+"slope", "intercept", "r2", "notes")
 
 conc_all <- read.xlsx("./01_input/as_se_app_note_data.xlsx", sheetIndex = 5) %>%
   select(2, 8:66) %>%
@@ -183,12 +196,17 @@ conc_blank_table_formatted[ ,1] <-
 
 
 
-conc_blank_table_formatted %>%
+(blank_table <-
+  conc_blank_table_formatted %>%
   kbl(escape = FALSE,
       format = "html",
       caption = "Table 1: Method detection limits (MDL) for all isotopes in 
       all modes.") %>% 
-  kable_classic(full_width = F, html_font = "Cambria")
+  kable_classic(full_width = F, 
+                html_font = "Cambria",
+                font_size = 24)
+)
+# Save table to image: save_kable(blank_table, "./03_incremental/as_se_mdl.png")
 ```
 
 
@@ -220,7 +238,7 @@ conc_single_cen <-
 
 # Generate labels for mode that will be parsed
 mode_labels <- 
-  c("Standard",
+  c("No Gas",
     "KED",
     "H[2]~MSMS", 
     "NH[3]~MSMS", 
@@ -324,7 +342,7 @@ conc_multi_cen <-
 
 ```
 
-```{r saving plots, include = FALSE, echo = false}
+```{r saving plots, include = FALSE, echo = FALSE}
 save_plot("./03_incremental/measured_conc_by_element.png",
           measured_conc_by_element_fig, 
           base_height = 12, 
