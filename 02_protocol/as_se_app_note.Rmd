@@ -42,18 +42,7 @@ theme_set(theme_bw() +
                   legend.text=element_text(size=12),
                   strip.text = element_text(size = 12))
           )
-# Function for getting more log10 breaks on the axis...which may be too many
-base_breaks <- function(n = 10){
-  function(x) {
-    axisTicks(log10(range(x, na.rm = TRUE)), log = TRUE, n = n)
-  }
-}
 ```
-
-## Overview
-
-## Standard curves:
-All standard curves were fit with the same samples run for all the different isotopes and modes, and thus, a common approach was used to fit the data. All samples were initially fit with a weighted linear regression, and data were examined visually for how well they fit for the high concentration samples. If the fit looked reasonable for the high concentration samples (within ~5% of the expected value), we examined the low concentraiton samples to see how well they were fit. If they were fit reasonably well, we accepted the fit. If they were not, we examined whether switching to a "simple linear" fit resulted in a better fit. In those cases where the high concentration data were poorly fit by the weighted linear regression, we changed the fit to a simple linear model. In general, this resulted in a less robust fit at low concentrations, but a dramatic increase in the R$^2$. 
 
 ```{r Importing data, echo=FALSE}
 calib_rsq <- read.xlsx("./01_input/standard_curve_fits.xlsx", sheetIndex = 1,
@@ -135,7 +124,8 @@ conc_blank_summary <-
             measurevar = "conc", 
             groupvars = c("isotope", "mode")) %>%
   select(1:5) %>%
-  mutate(mdl = sd*qt(0.01, N - 1, lower.tail = FALSE))
+  mutate(mdl = sd*qt(0.01, N - 1, lower.tail = FALSE),
+         mdl_b = ifelse(conc >= 0, mdl + conc, mdl))
 
 conc_ccv <- 
   filter(conc_longer, samp_id == "CCV 10ppb")
@@ -149,20 +139,47 @@ conc_srs <-
   filter(conc_all, samp_id %in% c("PPREE1", "SCREE1", paste0("T", 223:249)))
 ```
 
-Next steps include pivoting and parsing. Pivoting the conc_data dataframe by analyte, then parsing the analyte names and the samplesamp_ids so we can know what was in the sample and what was analyzed. To do this, I may want to parse out the single element samples,
+## Overview
+The purpose of this experiment was to examine the degree to which analysis of arsenic (As) and selenium (Se) interfere with one another and are interfered with by a selection of doubly charged rare earth elements including:
+* Dysprosium (Dy)
+* Erbium (Er
+* Europium (Eu)
+* Gadolinium (Gd)
+* Holmium (Ho)
+* Neodymium (Nd)
+* Samarium (Sm)
 
-analyte (e.g., Se74, As75, Se76)
-mode (ked, oshift, o2msms, o2q3, nh3, std)
-facet
-```{r}
-conc_blank_table <- 
+## Standard curves:
+For this experiment, we ran single element standard curves at 0, 0.1, 1, 10, and 100 ppb for both As and Se. In fitting the standard curves, no samples were omitted and the same samples were used for all the different isotopes and modes for each element. All curves were initially fit with a weighted linear regression, and data were examined visually for how well they fit for the high concentration samples. If the for the high concentration samples was not within ~5% of the expected value, we examined whether switching to a "simple linear" fit resulted in a better or worse fit for the high concentration data. We then examined the low concentration samples to see how well they were fit. If they were fit reasonably well, we accepted the fit. In those cases where the high concentration data were poorly fit by the weighted linear regression and we changed the fit to a simple linear model, this generally  resulted in a less robust fit at low concentrations, but a dramatic increase in the R$^2$. 
+
+## Determining the method detection limit:
+There are several different approaches for calculating method detection limits. The approaches generally take into account the variability in repeated measurements of either a blank or a low concentration sample, and can also take into account the concentration measured for blanks. For this study, we chose to follow a version of the EPA's 2016 updated guidance, which recommends establishing initial detection limits by repeated measurements of blanks, while accounting for the calculated concentration of elements in blanks.
+
+$$MDL_b~=~\overline{X} +t_{(n~-~1,~1~-~\alpha~=~0.99)}S_b$$
+$MDL_b$ = the MDL based on method blanks
+$\overline{X}$ = the mean of the method blank results (use 0 if mean is negative)
+$t_{(n~-~1,~1~-~\alpha~=~0.99)}$ = the student's t-value appropriate for the single-tailed 99th percentile t-statistic for n-1 degrees of freedom
+$S_b$ = standard deviation of method blank analyses
+
+
+```{r mdl table}
+conc_mdl_b_table <- 
+  conc_blank_summary %>%
+  mutate(mdl_b = round(mdl_b, digits = 3)) %>%
+  pivot_wider(names_from = isotope, 
+              values_from = mdl_b, 
+              id_cols = mode)
+
+conc_mdl_b_table_formatted <- conc_mdl_b_table 
+
+conc_mdl_table <- 
   conc_blank_summary %>%
   mutate(mdl = round(mdl, digits = 3)) %>%
   pivot_wider(names_from = isotope, 
               values_from = mdl, 
               id_cols = mode)
 
-conc_blank_table_formatted <- conc_blank_table 
+conc_mdl_table_formatted <- conc_mdl_table 
 
 # Generate labels for isotope_labels that will be parsed
 # First pull in the levels to be converted
@@ -178,7 +195,8 @@ isotope_labels_table <-
   as.vector(
     paste0("<sup>", isotope_labels_table$isotope, "</sup>", isotope_labels_table$element))
 
-colnames(conc_blank_table_formatted) <- rbind(c("Mode", isotope_labels_table))
+colnames(conc_mdl_b_table_formatted) <- rbind(c("Mode", isotope_labels_table))
+colnames(conc_mdl_table_formatted) <- rbind(c("Mode", isotope_labels_table))
 
 
 mode_labels_table <- 
@@ -190,27 +208,81 @@ mode_labels_table <-
     "O<sub>2</sub> Q3",
     "O<sub>2</sub> Shift")
 
-conc_blank_table_formatted[ ,1] <- 
+conc_mdl_b_table_formatted[ ,1] <- 
   mode_labels_table
 
+conc_mdl_table_formatted[ ,1] <- 
+  mode_labels_table
 
-
-
-(blank_table <-
-  conc_blank_table_formatted %>%
+(mdl_b_table <-
+  conc_mdl_b_table_formatted %>%
   kbl(escape = FALSE,
       format = "html",
-      caption = "Table 1: Method detection limits (MDL) for all isotopes in 
-      all modes.") %>% 
+      caption = "Table 1: Method detection limits on method blanks 
+      (MDL<sub>b</sub>) calculated using EPA 2016 guidelines for 
+      all isotopes in all modes.") %>% 
+  kable_classic(full_width = F, 
+                html_font = "Cambria",
+                font_size = 24)
+)
+
+(mdl_table <-
+  conc_mdl_table_formatted %>%
+  kbl(escape = FALSE,
+      format = "html",
+      caption = "Table 2: Method detection limits on method blanks 
+      (MDL) calculated using older EPA guidelines for 
+      all isotopes in all modes.") %>% 
   kable_classic(full_width = F, 
                 html_font = "Cambria",
                 font_size = 24)
 )
 # Save table to image: save_kable(blank_table, "./03_incremental/as_se_mdl.png")
 ```
+```{r table of R2 values}
+calib_rsq_table_formatted <- calib_rsq %>%
+  mutate(
+    mode = ordered(
+      mode,
+      levels = c("Standard", 
+                 "KED", 
+                 "H2", 
+                 "NH3", 
+                 "O2 MSMS", 
+                 "O2 Q3 Only", 
+                 "O2 Mass Shift")),
+    mode = fct_recode(
+      mode, 
+      "No Gas" = "Standard",
+      "KED" = "KED",
+      "H<sub>2</sub> MSMS" = "H2",
+      "NH<sub>3</sub> MSMS" = "NH3",
+      "O<sub>2</sub> MSMS" = "O2 MSMS",
+      "O<sub>2</sub> Q3" = "O2 Q3 Only",
+      "O<sub>2</sub> Shift" = "O2 Mass Shift"),
+    isotope = paste0("<sup>", isotope, "</sup>", element), 
+    r2 = round(r2, digits = 4),
+    .keep = "unused") %>%
+  select(isotope, r2, mode) %>%
+  pivot_wider(., names_from = "isotope", values_from = "r2",)
+
+colnames(calib_rsq_table_formatted) <- c("Mode", isotope_labels_table)
+
+(calib_rsq_table <-
+  calib_rsq_table_formatted %>%
+  arrange(Mode) %>%
+    kbl(escape = FALSE,
+      format = "html",
+      caption = "Table 3: R<sup>2</sup> values for standard curves for all 
+      isotopes in all modes.") %>% 
+  kable_classic(full_width = F, 
+                html_font = "Cambria",
+                font_size = 24)
+)
+```
 
 
-```{r single element tests, fig.height = 12, fig.width = 10}
+```{r single element plots: EPA MDL, fig.height = 12, fig.width = 10}
 conc_single <- 
   filter(conc_longer, 
          !samp_id %in% 
@@ -226,19 +298,19 @@ conc_single %<>%
                                  "Nd", "Sm")),
     amount = as.numeric(amount))
 
-conc_single_cen <-
+conc_single_cen_mdl_b <-
   merge(conc_single, 
         conc_blank_summary %>% 
-          select(1,2,6), 
+          select(1,2,7), 
         by.x = c(3, 4), 
         by.y = c(1,2), 
         all.y = TRUE) %>%
-  mutate(conc = ifelse(mdl >= conc, 1/2*mdl, conc)) %>%
-  select(-mdl)
+  mutate(conc = ifelse(mdl_b >= conc, 0.5 * mdl_b, conc)) %>%
+  select(-mdl_b)
 
 # Generate labels for mode that will be parsed
 mode_labels <- 
-  c("No Gas",
+  c("No~Gas",
     "KED",
     "H[2]~MSMS", 
     "NH[3]~MSMS", 
@@ -247,12 +319,12 @@ mode_labels <-
     "O[2]~Shift")
 
 # Name labels to align with existing values
-names(mode_labels) <- levels(as.factor(conc_single_cen$mode))
+names(mode_labels) <- levels(as.factor(conc_single_cen_mdl_b$mode))
 
 # Generate labels for isotope_labels that will be parsed
 # First pull in the levels to be converted
 isotope_labels <- 
-  c(levels(as.factor(conc_single_cen$isotope)))
+  c(levels(as.factor(conc_single_cen_mdl_b$isotope)))
 
 # Separate the levels
 isotope_labels <- data.frame(labels = isotope_labels) %>%
@@ -263,10 +335,10 @@ isotope_labels <-
   as.vector(
     paste0("''^", isotope_labels$isotope, "*", isotope_labels$element))
 
-names(isotope_labels) <- levels(as.factor(conc_single_cen$isotope))
+names(isotope_labels) <- levels(as.factor(conc_single_cen_mdl_b$isotope))
 
 (measured_conc_by_element_fig <- ggplot(
-  conc_single_cen %>%
+  conc_single_cen_mdl_b %>%
     mutate(
       mode = factor(mode, labels = mode_labels),
       isotope = factor(isotope, labels = isotope_labels)),
@@ -278,21 +350,28 @@ names(isotope_labels) <- levels(as.factor(conc_single_cen$isotope))
                      breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
                      labels = c("0", "", "0.1", "1", "10", "100", "1000")) +
   scale_x_log10() +
-  labs(x = "Concentration added of\n As, Se, or individual REE (ppb)", y = "Measured concentration, As or Se (ppb)") +
+  labs(x = "Concentration added of\n As, Se, or individual REE (ppb)", 
+       y = "Measured concentration, As or Se (ppb)") +
   scale_color_viridis_d(name = "Element added") +
   scale_shape_manual(name = "Element added",, values = c(0, 15, 1, 16, 2, 17, 5, 6, 25)) +
   theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
+  geom_hline(data = conc_blank_summary %>% 
+               mutate(
+                 mode = factor(mode, labels = mode_labels),
+                 isotope = factor(isotope, labels = isotope_labels)), 
+             aes(yintercept = 0.5*mdl_b), color = "red", linetype = 2) +
   facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)))
+
 
 ```
 
 
-```{r plots take 1, fig.height = 12, fig.width = 10}
+```{r multi element plots: EPA MDL, fig.height = 12, fig.width = 10}
 conc_multi <- 
   filter(conc_longer, 
          !samp_id %in% 
            c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
-         str_detect(samp_id, "^AsSe", negate = FALSE)) 
+         str_detect(samp_id, "^AsSe", negate = FALSE))
 
 conc_multi$samp_id %<>%  
   gsub("AsSe ", "", .) %>%
@@ -300,22 +379,25 @@ conc_multi$samp_id %<>%
 
 conc_multi %<>%
   separate("samp_id", into = c("expected", "ree"), sep = " ") %>%
-  mutate(expected = as.ordered(expected), ree = as.numeric(ree))
+  mutate(expected = as.ordered(expected), ree = as.numeric(ree)) %>%
+  rbind(., conc_blank_summary %>%
+          mutate(expected = 0, ree = 0) %>%
+        select(1, 2, 8, 9, 4))
 
-conc_multi_cen <-
+conc_multi_cen_mdl_b <-
   merge(conc_multi, 
         conc_blank_summary %>% 
-          select(1,2,6), 
+          select(1,2,7), 
         by.x = c(3, 4), 
         by.y = c(1,2), 
         all.y = TRUE) %>%
-  mutate(conc = ifelse(mdl >= conc, 1/2*mdl, conc)) %>%
-  select(-mdl)
+  mutate(conc = ifelse(mdl_b >= conc, 0.5*mdl_b, conc)) %>%
+  select(-mdl_b)
 
 # Generate a plot with facets, and with parsed facet labels drawn from the data.frame
 (measured_conc_by_ree_conc_fig <-
   ggplot(
-    conc_multi_cen %>%
+    conc_multi_cen_mdl_b %>%
       mutate(
         mode = factor(mode, labels = mode_labels),
         isotope = factor(isotope, labels = isotope_labels)
@@ -328,13 +410,20 @@ conc_multi_cen <-
                   breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
                   labels = c("0", "", "0.1", "1", "10", "100", "1000")
                   ) +
-    scale_x_log10(labels = prettyNum) +
+    scale_x_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
+                       breaks = c(0, 0.01, 0.1, 1, 10),
+                       labels = c("0", "", "0.1", "1", "10")) +
     labs(x = "Concentration REE mixture (ppb)", 
          y = "Measured concentration, As or Se (ppb)"
          ) +
     scale_color_viridis_d(
       name = "Actual \nConcentration \nAs or Se \n(ppb)") +
-    theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+    geom_hline(data = conc_blank_summary %>% 
+             mutate(
+               mode = factor(mode, labels = mode_labels),
+               isotope = factor(isotope, labels = isotope_labels)), 
+             aes(yintercept = mdl_b/2), color = "red", linetype = 2) +
     facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)
                )
   )
@@ -355,3 +444,81 @@ save_plot("./03_incremental/measured_conc_by_ree_conc.png",
           base_width = 10)
 ```
 
+```{r plots with standard mdl and censoring, fig.height = 12, fig.width = 10}
+conc_single_cen_typ <-
+  merge(conc_single, 
+        conc_blank_summary %>% 
+          select(1,2,6), 
+        by.x = c(3, 4), 
+        by.y = c(1,2), 
+        all.y = TRUE) %>%
+  mutate(conc = ifelse(mdl >= conc, 0.5 * mdl, conc)) %>%
+  select(-mdl)
+
+conc_multi_cen_typ <-
+  merge(conc_multi, 
+        conc_blank_summary %>% 
+          select(1,2,6), 
+        by.x = c(3, 4), 
+        by.y = c(1,2), 
+        all.y = TRUE) %>%
+  mutate(conc = ifelse(mdl >= conc, 0.5 * mdl, conc)) %>%
+  select(-mdl)
+
+(measured_conc_by_element_fig <- ggplot(
+  conc_single_cen_typ %>%
+    mutate(
+      mode = factor(mode, labels = mode_labels),
+      isotope = factor(isotope, labels = isotope_labels)),
+    aes(x = amount, y = conc)
+  ) +
+  geom_line(aes(group = element, color = element)) +
+  geom_point(aes(group = element, color = element, shape = element)) +
+  scale_y_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
+                     breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
+                     labels = c("0", "", "0.1", "1", "10", "100", "1000")) +
+  scale_x_log10() +
+  labs(x = "Concentration added of\n As, Se, or individual REE (ppb)", y = "Measured concentration, As or Se (ppb)") +
+  scale_color_viridis_d(name = "Element added") +
+  scale_shape_manual(name = "Element added",, values = c(0, 15, 1, 16, 2, 17, 5, 6, 25)) +
+  theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
+  geom_hline(data = conc_blank_summary %>% 
+               mutate(
+                 mode = factor(mode, labels = mode_labels),
+                 isotope = factor(isotope, labels = isotope_labels)), 
+             aes(yintercept = 0.5*mdl), color = "red", linetype = 2) +
+  facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)))
+
+(measured_conc_by_ree_conc_fig <-
+  ggplot(
+    conc_multi_cen_typ %>%
+      mutate(
+        mode = factor(mode, labels = mode_labels),
+        isotope = factor(isotope, labels = isotope_labels)
+        ),
+      aes(x = ree, y = conc)
+    ) +
+    geom_line(aes(group = expected, color = expected)) +
+    geom_point(aes(group = expected, color = expected)) +
+    scale_y_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
+                  breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
+                  labels = c("0", "", "0.1", "1", "10", "100", "1000")
+                  ) +
+    scale_x_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
+                       breaks = c(0, 0.01, 0.1, 1, 10),
+                       labels = c("0", "", "0.1", "1", "10")) +
+    labs(x = "Concentration REE mixture (ppb)", 
+         y = "Measured concentration, As or Se (ppb)"
+         ) +
+    scale_color_viridis_d(
+      name = "Actual \nConcentration \nAs or Se \n(ppb)") +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+    geom_hline(data = conc_blank_summary %>% 
+             mutate(
+               mode = factor(mode, labels = mode_labels),
+               isotope = factor(isotope, labels = isotope_labels)), 
+             aes(yintercept = 0.5*mdl), color = "red", linetype = 2) +
+    facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)
+               )
+  )
+```
