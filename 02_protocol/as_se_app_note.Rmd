@@ -59,7 +59,7 @@ calib_rsq <- read.xlsx("./01_input/standard_curve_fits.xlsx", sheetIndex = 1,
 colnames(calib_rsq) <- c("isotope", "element", "mode", "curve_type", "other_r2",
 "slope", "intercept", "r2", "notes")
 
-conc_all <- read.xlsx("./01_input/as_se_app_note_data.xlsx", sheetIndex = 5) %>%
+conc_all <- read.xlsx("./01_input/as_se_app_note_data_2.xlsx", sheetIndex = 5) %>%
   select(2, 8:66) %>%
   select(-starts_with("Rh"), -starts_with("Kr")) 
 
@@ -117,7 +117,11 @@ conc_longer %<>%
 
 
 conc_blank <- 
-  filter(conc_longer, samp_id == "LBLANK")
+  filter(conc_longer, 
+         samp_id == "LBLANK")%>%
+  mutate(replicate = rep(1:9, each = 48)) %>%
+  filter(replicate %in% c(2, 4:9)) %>%
+  select(!5)
 
 conc_blank_summary <- 
   summarySE(conc_blank, 
