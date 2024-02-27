@@ -59,6 +59,48 @@ calib_rsq <- read.xlsx("./01_input/standard_curve_fits.xlsx", sheetIndex = 1,
 colnames(calib_rsq) <- c("isotope", "element", "mode", "curve_type", "other_r2",
 "slope", "intercept", "r2", "notes")
 
+calib_rsq2 <- readxl::read_excel("./01_input/as_se_app_note_data_2.xlsx", sheet = 10, col_names = FALSE)
+calib_rsq2_isomodes <- calib_rsq2 %>%
+  slice(c(seq(1, 1301, by = 25)))
+
+calib_rsq2_corrcoef <- calib_rsq2 %>%
+  slice(c(seq(16, 1316, by = 25)))
+
+calib_rsq2_all <- cbind(calib_rsq2_isomodes[ , 1], calib_rsq2_corrcoef[ , 1])
+colnames(calib_rsq2_all) <- c("isomode", "corrcoef")
+
+calib_rsq2_all <- calib_rsq2_all %>%
+  mutate(isomode = gsub("Calibration Table -", "", isomode),
+         isomode = gsub("As", "As (75)", isomode)) %>%
+  separate(col = 1, into = c("isotope", "element", "mode", "masses"), sep = c(3, 8,-5)) %>%
+  select(-masses) %>%
+  mutate(mode = as.ordered(mode),
+         element = gsub("\\(", "", element),
+         element = gsub("\\)", "", element),
+         corrcoef = as.numeric(corrcoef))
+
+levels(calib_rsq2_all$mode) <- c("std", 
+                                 "h", 
+                                 "ked", 
+                                 "nh3", 
+                                 "o2_msms", 
+                                 "o2q3", 
+                                 "oshift")
+calib_rsq2_all <- calib_rsq2_all %>%
+  mutate(mode = ordered(mode, 
+                        levels = c("std",
+                                   "ked", 
+                                   "h", 
+                                   "nh3", 
+                                   "o2_msms", 
+                                   "o2q3", 
+                                   "oshift"))) %>%
+  filter(!is.na(corrcoef))
+
+```
+
+
+```{r Importing data, echo=FALSE}
 conc_all <- read.xlsx("./01_input/as_se_app_note_data_2.xlsx", sheetIndex = 5) %>%
   select(2, 8:66) %>%
   select(-starts_with("Rh"), -starts_with("Kr")) 
@@ -139,8 +181,6 @@ conc_ccv_summary <-
             measurevar = "conc",
             groupvars = c("isotope", "mode"))
 
-conc_srs <- 
-  filter(conc_all, samp_id %in% c("PPREE1", "SCREE1", paste0("T", 223:249)))
 ```
 
 ## Overview
@@ -244,31 +284,22 @@ conc_mdl_table_formatted[ ,1] <-
 # Save table to image: save_kable(blank_table, "./03_incremental/as_se_mdl.png")
 ```
 ```{r table of R2 values}
-calib_rsq_table_formatted <- calib_rsq %>%
+calib_rsq_table_formatted <- calib_rsq2_all %>%
   mutate(
-    mode = ordered(
-      mode,
-      levels = c("Standard", 
-                 "KED", 
-                 "H2", 
-                 "NH3", 
-                 "O2 MSMS", 
-                 "O2 Q3 Only", 
-                 "O2 Mass Shift")),
     mode = fct_recode(
       mode, 
-      "No Gas" = "Standard",
-      "KED" = "KED",
-      "H<sub>2</sub> MSMS" = "H2",
-      "NH<sub>3</sub> MSMS" = "NH3",
-      "O<sub>2</sub> MSMS" = "O2 MSMS",
-      "O<sub>2</sub> Q3" = "O2 Q3 Only",
-      "O<sub>2</sub> Shift" = "O2 Mass Shift"),
+      "No Gas" = "std",
+      "KED" = "ked",
+      "H<sub>2</sub> MSMS" = "h",
+      "NH<sub>3</sub> MSMS" = "nh3",
+      "O<sub>2</sub> MSMS" = "o2_msms",
+      "O<sub>2</sub> Q3" = "o2q3",
+      "O<sub>2</sub> Shift" = "oshift"),
     isotope = paste0("<sup>", isotope, "</sup>", element), 
-    r2 = round(r2, digits = 4),
+    corrcoef = round(corrcoef, digits = 4),
     .keep = "unused") %>%
-  select(isotope, r2, mode) %>%
-  pivot_wider(., names_from = "isotope", values_from = "r2",)
+  select(isotope, corrcoef, mode) %>%
+  pivot_wider(., names_from = "isotope", values_from = "corrcoef",)
 
 colnames(calib_rsq_table_formatted) <- c("Mode", isotope_labels_table)
 
@@ -277,7 +308,7 @@ colnames(calib_rsq_table_formatted) <- c("Mode", isotope_labels_table)
   arrange(Mode) %>%
     kbl(escape = FALSE,
       format = "html",
-      caption = "Table 3: R<sup>2</sup> values for standard curves for all 
+      caption = "Table 3: Correlation coefficients for standard curves for all 
       isotopes in all modes.") %>% 
   kable_classic(full_width = F, 
                 html_font = "Cambria",
@@ -526,3 +557,72 @@ conc_multi_cen_typ <-
                )
   )
 ```
+
+## Comparing SRS observed to SRS most probable values
+
+```{r SRS import and comparison, fig.height = 12, fig_width = 10}
+conc_srs <- 
+  filter(conc_longer, 
+         samp_id %in% c("PPREE1", "SCREE1", paste0("T", 223:249)))
+
+# Import most probable value data
+srs_mpv <- read.xlsx("./01_input/srs_data.xlsx", 
+                 sheetIndex = 1, 
+                 rowIndex = c(seq(11, 51, by = 2))) %>%
+  select(2, 5, 36, 15, 16, 17, 19, 20, 29, 38)
+  
+
+# Import most F-pseudosigma (deviation)
+srs_fsigma <- read.xlsx("./01_input/srs_data.xlsx", 
+                 sheetIndex = 1, 
+                 rowIndex = c(11, seq(14, 52, by = 2))) %>%
+  select(2, 5, 36, 15, 16, 17, 19, 20, 29, 38) %>%
+  mutate(TRACE = srs_mpv$TRACE)
+
+# Pivot and merge (or bind)
+
+srs_mpv_longer <- pivot_longer(srs_mpv, 
+                               2:10, 
+                               names_to = "element", 
+                               values_to = "mpv")
+
+srs_fsigma_longer <- pivot_longer(srs_fsigma, 
+                                  2:10, 
+                                  names_to = "element", 
+                                  values_to = "fsigma")
+
+srs_all <- merge(srs_mpv_longer, srs_fsigma_longer) %>%
+  mutate(sample = TRACE, .before = element, .keep = "unused") %>%
+  mutate(mpv = gsub("ID", NA, mpv))
+
+srs_appnote <- filter(srs_all, sample %in% c("T239", "T243", "T249", "T223", "T227"))
+
+levels(as.factor(srs_appnote$sample))
+
+ggplot(conc_srs %>%
+         filter(conc < 1000), aes(x = mode, y = conc))+ #, color = mode, shape = mode
+  geom_point(position = position_dodge(width = 0.5)) +
+  scale_shape_manual(name = "mode", values = c(0, 15, 1, 16, 2, 17, 5)) +
+  scale_y_log10() + 
+  geom_hline(yintercept = 2, color = "red", linetype = 2) +
+  facet_grid(samp_id ~ isotope, scales = "free_y")
+
+```
+
+
+From Verplank et al. 2001, As: 0.005 and 0.002 mg/L in PPREE1 and SCREE1, respectively, and no data for Se as determined by GFAA
+
+```{r}
+ppree_scree_ree <- 
+  data.frame(element = c("As", "Se", "Nd", "Sm", "Eu", "Gd", "Dy", "Ho", "Er"),
+             ppree1_mpv = c(1.5, 3.4, 92.3, 20.3, 5.95, 23.8, 22.0, 4.43, 11.9),
+             ppre1_mad = c(0.1, NA, 5.7, 1.5, 0.48, 1.7, 0.7, 0.09, 0.4),
+             scree1_mpv = c(0.2, 2.6, 22.1, 6.71, 1.47, 8.21, 8.10, 1.61, 4.35),
+             scree1_mad = c(NA, NA, 0.9, 0.31, 0.07, 0.65, 0.34, 0.06, 0.21))
+
+
+
+```
+
+From Wolf and Adams 2015:
+
