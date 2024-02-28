@@ -44,7 +44,7 @@ theme_set(theme_bw() +
           )
 ```
 
-```{r Importing data, echo=FALSE}
+```{r Importing correlation data, echo=FALSE}
 calib_rsq <- read.xlsx("./01_input/standard_curve_fits.xlsx", sheetIndex = 1,
                        colClasses = c("numeric", 
                                       "character", 
@@ -105,7 +105,10 @@ conc_all <- read.xlsx("./01_input/as_se_app_note_data_2.xlsx", sheetIndex = 5) %
   select(2, 8:66) %>%
   select(-starts_with("Rh"), -starts_with("Kr")) 
 
-conc_all <- conc_all[-c(5, 63), ] # Removed bad data due to bad IS due to instrument
+conc_kr <- read.xlsx("./01_input/as_se_app_note_data_2.xlsx", sheetIndex = 1) %>%
+  select(2, starts_with("Kr")) 
+
+conc_all <- conc_all[-c(74, 82), ] # Removed bad data due to bad IS due to instrument, was 5 and 63, now 24 and 82, but also should add 74, and maybe we remove 24 since it is just the H2 mode
 
 names <- colnames(conc_all)
 
@@ -283,7 +286,7 @@ conc_mdl_table_formatted[ ,1] <-
 )
 # Save table to image: save_kable(blank_table, "./03_incremental/as_se_mdl.png")
 ```
-```{r table of R2 values}
+```{r table of R values}
 calib_rsq_table_formatted <- calib_rsq2_all %>%
   mutate(
     mode = fct_recode(
@@ -405,7 +408,7 @@ names(isotope_labels) <- levels(as.factor(conc_single_cen_mdl_b$isotope))
 conc_multi <- 
   filter(conc_longer, 
          !samp_id %in% 
-           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
+           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1", "AsSe 10ppb"),
          str_detect(samp_id, "^AsSe", negate = FALSE))
 
 conc_multi$samp_id %<>%  
@@ -566,63 +569,278 @@ conc_srs <-
          samp_id %in% c("PPREE1", "SCREE1", paste0("T", 223:249)))
 
 # Import most probable value data
-srs_mpv <- read.xlsx("./01_input/srs_data.xlsx", 
+t_srs_mpv <- read.xlsx("./01_input/srs_data.xlsx", 
                  sheetIndex = 1, 
                  rowIndex = c(seq(11, 51, by = 2))) %>%
   select(2, 5, 36, 15, 16, 17, 19, 20, 29, 38)
   
 
 # Import most F-pseudosigma (deviation)
-srs_fsigma <- read.xlsx("./01_input/srs_data.xlsx", 
+t_srs_fsigma <- read.xlsx("./01_input/srs_data.xlsx", 
                  sheetIndex = 1, 
                  rowIndex = c(11, seq(14, 52, by = 2))) %>%
   select(2, 5, 36, 15, 16, 17, 19, 20, 29, 38) %>%
-  mutate(TRACE = srs_mpv$TRACE)
+  mutate(TRACE = t_srs_mpv$TRACE)
 
 # Pivot and merge (or bind)
 
-srs_mpv_longer <- pivot_longer(srs_mpv, 
+t_srs_mpv_longer <- pivot_longer(t_srs_mpv, 
                                2:10, 
                                names_to = "element", 
                                values_to = "mpv")
 
-srs_fsigma_longer <- pivot_longer(srs_fsigma, 
+t_srs_fsigma_longer <- pivot_longer(t_srs_fsigma, 
                                   2:10, 
                                   names_to = "element", 
                                   values_to = "fsigma")
 
-srs_all <- merge(srs_mpv_longer, srs_fsigma_longer) %>%
+t_srs_all <- merge(t_srs_mpv_longer, t_srs_fsigma_longer) %>%
   mutate(sample = TRACE, .before = element, .keep = "unused") %>%
-  mutate(mpv = gsub("ID", NA, mpv))
+  mutate(mpv = gsub("ID", NA, mpv),
+         mpv = as.numeric(mpv),
+         fsigma = as.numeric(fsigma))
 
-srs_appnote <- filter(srs_all, sample %in% c("T239", "T243", "T249", "T223", "T227"))
+t_srs_appnote <- filter(t_srs_all, sample %in% c("T239", "T243", "T249", "T223", "T227"))
 
-levels(as.factor(srs_appnote$sample))
-
-ggplot(conc_srs %>%
-         filter(conc < 1000), aes(x = mode, y = conc))+ #, color = mode, shape = mode
-  geom_point(position = position_dodge(width = 0.5)) +
-  scale_shape_manual(name = "mode", values = c(0, 15, 1, 16, 2, 17, 5)) +
-  scale_y_log10() + 
-  geom_hline(yintercept = 2, color = "red", linetype = 2) +
-  facet_grid(samp_id ~ isotope, scales = "free_y")
-
-```
-
-
-From Verplank et al. 2001, As: 0.005 and 0.002 mg/L in PPREE1 and SCREE1, respectively, and no data for Se as determined by GFAA
-
-```{r}
-ppree_scree_ree <- 
+#Enter data for PPREE1 and SCREE1 from Verplanck et al. 2001
+ppree_scree <- 
   data.frame(element = c("As", "Se", "Nd", "Sm", "Eu", "Gd", "Dy", "Ho", "Er"),
              ppree1_mpv = c(1.5, 3.4, 92.3, 20.3, 5.95, 23.8, 22.0, 4.43, 11.9),
-             ppre1_mad = c(0.1, NA, 5.7, 1.5, 0.48, 1.7, 0.7, 0.09, 0.4),
+             ppree1_mad = c(0.1, NA, 5.7, 1.5, 0.48, 1.7, 0.7, 0.09, 0.4),
              scree1_mpv = c(0.2, 2.6, 22.1, 6.71, 1.47, 8.21, 8.10, 1.61, 4.35),
              scree1_mad = c(NA, NA, 0.9, 0.31, 0.07, 0.65, 0.34, 0.06, 0.21))
 
+# Data were double checked, but need to be rearranged for easier comparisons
+ppree <- ppree_scree %>%
+  select(1:3) %>%
+  mutate(mpv = ppree1_mpv, 
+         fsigma = ppree1_mad,
+         .keep = "unused") %>%
+  mutate(sample = "PPREE1", .before = 1)
 
+scree <- ppree_scree %>%
+  select(1, 4, 5) %>%
+  mutate(mpv = scree1_mpv, 
+         fsigma = scree1_mad,
+         .keep = "unused") %>%
+  mutate(sample = "SCREE1", .before = 1)
+
+ppree_scree_longer <- rbind(ppree, scree) 
+
+# Now we combine the "T" SRS samples with the PPREE1 and SCREE1 samples:
+
+srs_appnote <- rbind(t_srs_appnote, ppree_scree_longer)
+srs_appnote_as <- filter(srs_appnote, element == "As") %>%
+  mutate(isotope = "As 75", .before = mpv) %>%
+  select(1, 3:5)
+
+srs_appnote_se <- filter(srs_appnote, element == "Se") %>%
+  mutate(isotope = "", .before = mpv) %>%
+  select(1, 3:5)
+
+srs_appnote_as_se <-
+  rbind(srs_appnote_as,
+        # srs_appnote_se %>%
+        #   mutate(isotope = "Se 74"),
+        # srs_appnote_se %>%
+        #   mutate(isotope = "Se 76"),
+        # srs_appnote_se %>%
+        #   mutate(isotope = "Se 77"),
+        srs_appnote_se %>%
+          mutate(isotope = "Se 78"),
+        srs_appnote_se %>%
+        #   mutate(isotope = "Se 80"),
+        # srs_appnote_se %>%
+          mutate(isotope = "Se 82")) %>%
+  mutate(samp_id = sample, .before = 1, .keep = "unused")
+
+isotope_labels_short <- isotope_labels[c(1, 5, 7)]
+
+mode_labels_only <- 
+  c("No~Gas",
+    "KED",
+    "H[2]~MSMS", 
+    "NH[3]~MSMS", 
+    "O[2]~MSMS",
+    "O[2]~Q3",
+    "O[2]~Shift")
+ 
+ggplot(conc_srs %>%
+         filter(conc < 1000) %>%
+         filter(isotope %in% c("As 75", "Se 78", "Se 82")) %>%
+         mutate(mode = factor(mode, labels = mode_labels),
+                isotope = factor(isotope, labels = isotope_labels_short))) + #, color = mode, shape = mode
+  geom_point(aes(x = mode, y = conc), position = position_dodge(width = 0.5)) +
+  scale_shape_manual(name = "mode", values = c(0, 15, 1, 16, 2, 17, 5)) +
+  # scale_y_log10() + 
+  scale_x_discrete("Mode", labels = parse(text = mode_labels_only)) +
+  geom_hline(data = srs_appnote_as_se %>% 
+               mutate(isotope = factor(isotope, labels = isotope_labels_short)),
+             aes(yintercept = mpv), color = "red", linetype = 2) +
+  geom_hline(data = srs_appnote_as_se %>% 
+               mutate(isotope = factor(isotope, labels = isotope_labels_short)),
+             aes(yintercept = mpv + fsigma), color = "red", linetype = 2) +
+  geom_hline(data = srs_appnote_as_se %>% 
+               mutate(isotope = factor(isotope, labels = isotope_labels_short)), 
+             aes(yintercept = mpv - fsigma), color = "red", linetype = 2) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_grid(samp_id ~ isotope, labeller = as_labeller(label_parsed), scales = "free_y")
+
+(srs_ree.fig <- ggplot(srs_appnote %>%
+                        filter(element %in% 
+                                 c("Dy", 
+                                   "Er", 
+                                   "Eu", 
+                                   "Gd", 
+                                   "Ho", 
+                                   "Nd", 
+                                   "Sm")),
+                      aes(x = element, y = mpv)) +
+  geom_point(size = 3)+
+  geom_errorbar(aes(ymax = mpv + fsigma, ymin = mpv - fsigma), width = 0.2) +
+  facet_wrap(~sample, scales = "free_y"))
 
 ```
 
-From Wolf and Adams 2015:
+## Looking at Kr
+
+```{r working up Kr}
+conc_kr <- read.xlsx("./01_input/as_se_app_note_data_2.xlsx", sheetIndex = 1) %>%
+  select(2, starts_with("Kr"))
+
+# Remove bad data due to bad IS due to instrument, was 5 and 63, now 24 and 82,
+# but also should add 74, and maybe we remove 24 since it is just the H2 mode
+conc_kr <- conc_kr [-c(74, 82), ]
+
+names2 <- colnames(conc_kr)
+
+names2 <-
+  gsub("\\.", " ", names) %>%
+  gsub("Sample Id", "samp_id", .) %>%
+  gsub("  ", " ", .) %>%
+  gsub("  ", " ", .) %>%
+  gsub(" Helium.KED_LowLow cps ", "", .) %>%
+  gsub(" Oxygen DRC cps ", "", .) %>%
+  gsub(" Ammonia DRC cps ", "", .) %>%
+  gsub("Oxygen DRC cps", "", .) %>%
+  gsub(" Hydrogen DRC cps ", "", .) %>%
+  gsub("As ", "As 75 ", .) %>%
+  gsub("As 75 75", "As 75 ", .) %>%
+  gsub("O2 MSMS", "o2_msms", .) %>%
+  gsub("KED", "ked", .) %>%
+  gsub("O2 Q3", "o2q3 XX", .) %>%
+  gsub("OShift", "oshift", .) %>%
+  gsub("NH3", "nh3", .) %>%
+  gsub("H", "h", .)
+
+colnames(conc_kr) <-
+  names2
+
+
+conc_kr_longer <-
+  pivot_longer(conc_kr,
+               2:7,
+               names_to = "isomodes",
+               values_to = "raw") %>%
+  separate("isomodes", into = c("isotope", "mode", "masses"), sep = c(5,-5)) %>%
+  select(-masses)
+
+conc_kr_longer$mode %<>%
+  gsub(" ", "", .) %>%
+  gsub("[0-9]+[0-9]+[0-9]+[0-9]", "std", .) %>%
+  gsub("[0-9]+[0-9]", "std", .)
+
+conc_kr_longer %<>%
+    mutate(
+      mode = ordered(
+        mode,
+        levels = c("std",
+                   "ked",
+                   "h",
+                   "nh3",
+                   "o2_msms",
+                   "o2q3",
+                   "oshift")))
+
+
+conc_kr_single <- 
+  filter(conc_kr_longer, 
+         !samp_id %in% 
+           c("LBLANK", "CAL BLANK", "CCV 10ppb", paste0("T", 223:249), "PPREE1", "SCREE1"),
+         str_detect(samp_id, "^AsSe", negate = TRUE))
+
+
+conc_single %<>%
+  separate("samp_id", into = c("element", "amount"), sep = " ") %>%
+  mutate(
+    element = ordered(element, 
+                      levels = c("As", "Se", "Dy", "Er", "Eu", "Gd", "Ho",
+                                 "Nd", "Sm")),
+    amount = as.numeric(amount))
+
+conc_single_cen_mdl_b <-
+  merge(conc_single, 
+        conc_blank_summary %>% 
+          select(1,2,7), 
+        by.x = c(3, 4), 
+        by.y = c(1,2), 
+        all.y = TRUE) %>%
+  mutate(conc = ifelse(mdl_b >= conc, 0.5 * mdl_b, conc)) %>%
+  select(-mdl_b)
+
+# Generate labels for mode that will be parsed
+mode_labels <- 
+  c("No~Gas",
+    "KED",
+    "H[2]~MSMS", 
+    "NH[3]~MSMS", 
+    "O[2]~MSMS",
+    "O[2]~Q3",
+    "O[2]~Shift")
+
+# Name labels to align with existing values
+names(mode_labels) <- levels(as.factor(conc_single_cen_mdl_b$mode))
+
+# Generate labels for isotope_labels that will be parsed
+# First pull in the levels to be converted
+isotope_labels <- 
+  c(levels(as.factor(conc_single_cen_mdl_b$isotope)))
+
+# Separate the levels
+isotope_labels <- data.frame(labels = isotope_labels) %>%
+  separate(., labels, into = c("element", "isotope"), sep = " ")
+
+# Recombine the levels and convert back to a vector
+isotope_labels <- 
+  as.vector(
+    paste0("''^", isotope_labels$isotope, "*", isotope_labels$element))
+
+names(isotope_labels) <- levels(as.factor(conc_single_cen_mdl_b$isotope))
+
+(measured_conc_by_element_fig <- ggplot(
+  conc_single_cen_mdl_b %>%
+    mutate(
+      mode = factor(mode, labels = mode_labels),
+      isotope = factor(isotope, labels = isotope_labels)),
+    aes(x = amount, y = conc)
+  ) +
+  geom_line(aes(group = element, color = element)) +
+  geom_point(aes(group = element, color = element, shape = element)) +
+  scale_y_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
+                     breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
+                     labels = c("0", "", "0.1", "1", "10", "100", "1000")) +
+  scale_x_log10() +
+  labs(x = "Concentration added of\n As, Se, or individual REE (ppb)", 
+       y = "Measured concentration, As or Se (ppb)") +
+  scale_color_viridis_d(name = "Element added") +
+  scale_shape_manual(name = "Element added",, values = c(0, 15, 1, 16, 2, 17, 5, 6, 25)) +
+  theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
+  geom_hline(data = conc_blank_summary %>% 
+               mutate(
+                 mode = factor(mode, labels = mode_labels),
+                 isotope = factor(isotope, labels = isotope_labels)), 
+             aes(yintercept = 0.5*mdl_b), color = "red", linetype = 2) +
+  facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)))
+
+```
 
