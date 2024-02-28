@@ -334,7 +334,8 @@ conc_single %<>%
     element = ordered(element, 
                       levels = c("As", "Se", "Dy", "Er", "Eu", "Gd", "Ho",
                                  "Nd", "Sm")),
-    amount = as.numeric(amount))
+    amount = as.numeric(amount)) %>%
+  filter(!is.na(amount))
 
 conc_single_cen_mdl_b <-
   merge(conc_single, 
