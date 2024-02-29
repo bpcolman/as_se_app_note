@@ -705,18 +705,18 @@ ggplot(conc_srs %>%
 
 ## Looking at Kr
 
-```{r working up Kr}
+```{r working up Kr, fig.height = 12, fig.width = 8}
 conc_kr <- read.xlsx("./01_input/as_se_app_note_data_2.xlsx", sheetIndex = 1) %>%
-  select(2, starts_with("Kr"))
+  select(2, starts_with("Kr")) %>%
+  slice(-c(74,82))
 
 # Remove bad data due to bad IS due to instrument, was 5 and 63, now 24 and 82,
 # but also should add 74, and maybe we remove 24 since it is just the H2 mode
-conc_kr <- conc_kr [-c(74, 82), ]
 
 names2 <- colnames(conc_kr)
 
 names2 <-
-  gsub("\\.", " ", names) %>%
+  gsub("\\.", " ", names2) %>%
   gsub("Sample Id", "samp_id", .) %>%
   gsub("  ", " ", .) %>%
   gsub("  ", " ", .) %>%
@@ -760,7 +760,6 @@ conc_kr_longer %<>%
                    "h",
                    "nh3",
                    "o2_msms",
-                   "o2q3",
                    "oshift")))
 
 
@@ -771,77 +770,67 @@ conc_kr_single <-
          str_detect(samp_id, "^AsSe", negate = TRUE))
 
 
-conc_single %<>%
+conc_kr_single %<>%
   separate("samp_id", into = c("element", "amount"), sep = " ") %>%
   mutate(
     element = ordered(element, 
                       levels = c("As", "Se", "Dy", "Er", "Eu", "Gd", "Ho",
                                  "Nd", "Sm")),
-    amount = as.numeric(amount))
-
-conc_single_cen_mdl_b <-
-  merge(conc_single, 
-        conc_blank_summary %>% 
-          select(1,2,7), 
-        by.x = c(3, 4), 
-        by.y = c(1,2), 
-        all.y = TRUE) %>%
-  mutate(conc = ifelse(mdl_b >= conc, 0.5 * mdl_b, conc)) %>%
-  select(-mdl_b)
+    amount = as.numeric(amount)) %>%
+    filter(!is.na(amount),
+           mode != "oshift") %>% droplevels()
 
 # Generate labels for mode that will be parsed
-mode_labels <- 
+mode_labels_kr <- 
   c("No~Gas",
     "KED",
     "H[2]~MSMS", 
     "NH[3]~MSMS", 
-    "O[2]~MSMS",
-    "O[2]~Q3",
-    "O[2]~Shift")
+    "O[2]~MSMS")
 
 # Name labels to align with existing values
-names(mode_labels) <- levels(as.factor(conc_single_cen_mdl_b$mode))
+names(mode_labels_kr) <- levels(as.factor(conc_kr_single$mode))
 
 # Generate labels for isotope_labels that will be parsed
 # First pull in the levels to be converted
-isotope_labels <- 
-  c(levels(as.factor(conc_single_cen_mdl_b$isotope)))
+isotope_labels_kr <- 
+  c(levels(as.factor(conc_kr_single$isotope)))
 
 # Separate the levels
-isotope_labels <- data.frame(labels = isotope_labels) %>%
+isotope_labels_kr <- data.frame(labels = isotope_labels_kr) %>%
   separate(., labels, into = c("element", "isotope"), sep = " ")
 
 # Recombine the levels and convert back to a vector
-isotope_labels <- 
+isotope_labels_kr <- 
   as.vector(
-    paste0("''^", isotope_labels$isotope, "*", isotope_labels$element))
+    paste0("''^", isotope_labels_kr$isotope, "*", isotope_labels_kr$element))
 
-names(isotope_labels) <- levels(as.factor(conc_single_cen_mdl_b$isotope))
+names(isotope_labels_kr) <- levels(as.factor(conc_kr_single$isotope))
 
-(measured_conc_by_element_fig <- ggplot(
-  conc_single_cen_mdl_b %>%
-    mutate(
-      mode = factor(mode, labels = mode_labels),
-      isotope = factor(isotope, labels = isotope_labels)),
-    aes(x = amount, y = conc)
+(
+  measured_conc_by_element_kr_fig <- ggplot(
+    conc_kr_single %>%
+      mutate(
+        mode = factor(mode, labels = mode_labels_kr),
+        isotope = factor(isotope, labels = isotope_labels_kr)
+      ),
+    aes(x = amount, y = raw)
   ) +
-  geom_line(aes(group = element, color = element)) +
-  geom_point(aes(group = element, color = element, shape = element)) +
-  scale_y_continuous(trans = pseudo_log_trans(sigma = 0.01, base = 10),
-                     breaks = c(0, 0.01, 0.1, 1, 10, 100, 1000),
-                     labels = c("0", "", "0.1", "1", "10", "100", "1000")) +
-  scale_x_log10() +
-  labs(x = "Concentration added of\n As, Se, or individual REE (ppb)", 
-       y = "Measured concentration, As or Se (ppb)") +
-  scale_color_viridis_d(name = "Element added") +
-  scale_shape_manual(name = "Element added",, values = c(0, 15, 1, 16, 2, 17, 5, 6, 25)) +
-  theme(axis.text.x = element_text(angle = 60,hjust = 1)) +
-  geom_hline(data = conc_blank_summary %>% 
-               mutate(
-                 mode = factor(mode, labels = mode_labels),
-                 isotope = factor(isotope, labels = isotope_labels)), 
-             aes(yintercept = 0.5*mdl_b), color = "red", linetype = 2) +
-  facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed)))
+    geom_line(aes(group = element, color = element)) +
+    geom_point(aes(
+      group = element,
+      color = element,
+      shape = element
+    )) +
+    scale_y_log10() +
+    scale_x_log10() +
+    labs(x = "Concentration added of\n As, Se, or individual REE (ppb)",
+         y = "Raw Intensity (cps)") +
+    scale_color_viridis_d(name = "Element added") +
+    scale_shape_manual(name = "Element added", , values = c(0, 15, 1, 16, 2, 17, 5, 6, 25)) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+    facet_grid(mode ~ isotope, labeller = as_labeller(label_parsed), scales = "free_y")
+)
 
 ```
 
